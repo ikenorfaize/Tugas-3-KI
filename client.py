@@ -1,6 +1,8 @@
-import socket
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
+from Crypto.Cipher import DES3
+import socket
+import base64
 
 # Fungsi untuk mengkonversi string ke biner
 def string_to_binary(s):
@@ -237,7 +239,7 @@ def des_decrypt_string(ciphertext, key):
     return unpad(binary_to_string(plaintext))
 
 # plaintext = "Informatika22"
-# key = "Informatika"
+# key = "Informatika" 
 
 # encrypted_text = des_encrypt_string(plaintext, key)
 # print(f"Enkripsi: {encrypted_text}")
@@ -247,50 +249,48 @@ def des_decrypt_string(ciphertext, key):
 
 # Fungsi untuk meminta kunci publik dari PKA
 def get_public_key_from_pka():
-    host = '127.0.0.1'  # Alamat PKA
-    port = 6000         # Port PKA
+    pka_host = '127.0.0.1'  # Alamat PKA
+    pka_port = 6000         # Port PKA
 
-    client_socket = socket.socket()
-    client_socket.connect((host, port))
+    try:
+        client_socket = socket.socket()
+        client_socket.connect((pka_host, pka_port))
+        
+        client_socket.send(b"REQUEST")
+        public_key = client_socket.recv(2048)
+        client_socket.close()
+        
+        print("Kunci publik diterima dari PKA.")
+        return RSA.import_key(public_key)
+    except Exception as e:
+        print(f"Error saat meminta kunci publik dari PKA: {e}")
+        return None
 
-    # Terima kunci publik dari PKA
-    public_key = client_socket.recv(1024)
-    print("Kunci publik diterima dari PKA.")
 
-    client_socket.close()
-
-    # Kembalikan kunci publik dalam format RSA
-    return RSA.import_key(public_key)
-
-# Fungsi RSA Enkripsi
-def rsa_encrypt(data, public_key):
-    cipher_rsa = PKCS1_OAEP.new(public_key)
-    return cipher_rsa.encrypt(data)
-
-# Fungsi Utama Klien
 def client_program():
-    host = '127.0.0.1'  # Alamat server
-    port = 5000         # Port server
+    server_host = '127.0.0.1'  # Alamat server
+    server_port = 5000         # Port server
 
     client_socket = socket.socket()
-    client_socket.connect((host, port))
+    client_socket.connect((server_host, server_port))
 
-    # Meminta kunci publik dari PKA
+    # Mendapatkan kunci publik dari PKA
     public_key = get_public_key_from_pka()
+    if public_key is None:
+        print("Gagal mendapatkan kunci publik dari PKA.")
+        return
 
-    # Generate DES key (8 bytes)
-    des_key = "informatika"  # Harus string 8 karakter
+    # Enkripsi kunci DES
+    des_key = b"8bytekey"  # Kunci DES harus 8 byte
+    print("Kunci DES yang akan dikirim:", des_key)
 
-    # Encrypt DES key with RSA public key
-    encrypted_key = rsa_encrypt(des_key.encode(), public_key)
+    cipher_rsa = PKCS1_OAEP.new(public_key)
+    encrypted_key = cipher_rsa.encrypt(des_key)
+    print("Kunci DES terenkripsi (base64):", base64.b64encode(encrypted_key))
+
+    # Kirim kunci DES terenkripsi ke server
     client_socket.send(encrypted_key)
-    print("Kunci DES terenkripsi dikirim.")
-
-    # Encrypt data using DES (menggunakan DES buatan sendiri)
-    plaintext = "keamanan informasi"
-    encrypted_data = des_encrypt_string(plaintext, des_key)
-    client_socket.send(encrypted_data.encode())  # Kirim sebagai byte string
-    print("Data terenkripsi dikirim: ", encrypted_data)
+    print("Kunci DES terenkripsi berhasil dikirim ke server.")
 
     client_socket.close()
 
