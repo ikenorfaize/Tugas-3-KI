@@ -1,84 +1,83 @@
-import random
+import socket
+import logging
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
-from Crypto.Signature import pkcs1_15
-from Crypto.Hash import SHA256
-import socket
+from threading import Thread
 
-# Membuat pasangan kunci RSA untuk PKA (jika belum tersedia)
-def generate_rsa_keys():
-    key = RSA.generate(2048)
-    private_key = key.export_key()
-    public_key = key.publickey().export_key()
-    with open("private_key.pem", "wb") as priv_file:
-        priv_file.write(private_key)
-    with open("public_key.pem", "wb") as pub_file:
-        pub_file.write(public_key)
+# Konfigurasi logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Fungsi untuk memuat kunci RSA dari file
-def load_rsa_keys():
+def handle_client(conn, address, public_key):
+    """Fungsi untuk menangani koneksi klien."""
     try:
-        with open("private_key.pem", "rb") as priv_file:
-            private_key = RSA.import_key(priv_file.read())
-        with open("public_key.pem", "rb") as pub_file:
-            public_key = RSA.import_key(pub_file.read())
-        return private_key, public_key
+        logging.info(f"Koneksi diterima dari: {address}")
+
+        # Kirimkan kunci publik ke klien
+        conn.send(public_key)
+        logging.info(f"Kunci publik dikirim ke: {address}")
+
+        # Terima data terenkripsi dari klien
+        encrypted_key = conn.recv(1024)
+        logging.info(f"Data terenkripsi diterima dari {address}: {encrypted_key}")
+
+        # Muat kunci privat server untuk dekripsi
+        try:
+            with open("private_key.pem", "rb") as f:
+                private_key = RSA.import_key(f.read())
+
+            # Dekripsi data menggunakan kunci privat
+            cipher = PKCS1_OAEP.new(private_key)
+            decrypted_data = cipher.decrypt(encrypted_key)
+            logging.info(f"Data berhasil didekripsi: {decrypted_data.decode('utf-8')}")
+        except FileNotFoundError:
+            logging.error("File private_key.pem tidak ditemukan.")
+        except ValueError as ve:
+            logging.error(f"Dekripsi gagal. Pastikan kunci cocok dan data tidak korup: {ve}")
+        except Exception as e:
+            logging.error(f"Error saat dekripsi: {e}")
+    except Exception as e:
+        logging.error(f"Error saat menangani klien {address}: {e}")
+    finally:
+        conn.close()
+
+
+def pka_server_program(host='127.0.0.1', port=6000):
+    """Program server PKA."""
+    # Muat kunci publik server RSA dari file
+    try:
+        with open("public_key.pem", "rb") as f:
+            public_key = f.read()
     except FileNotFoundError:
-        print("Kunci RSA tidak ditemukan, membuat kunci baru...")
-        generate_rsa_keys()
-        return load_rsa_keys()
-
-# Fungsi untuk menandatangani data
-def sign_data(data, private_key):
-    hash_obj = SHA256.new(data.encode())
-    signature = pkcs1_15.new(private_key).sign(hash_obj)
-    return signature
-
-# Fungsi untuk memverifikasi tanda tangan
-def validate_signature(data, signature, public_key):
-    hash_obj = SHA256.new(data.encode())
-    try:
-        pkcs1_15.new(public_key).verify(hash_obj, signature)
-        return True
-    except (ValueError, TypeError):
-        return False
-
-# Fungsi server untuk mengirim kunci publik
-def pka_server_program():
-    host = '127.0.0.1'  # Alamat server PKA
-    port = 6000         # Port untuk PKA
-
-    # Muat kunci RSA
-    private_key, public_key = load_rsa_keys()
+        logging.error("File public_key.pem tidak ditemukan.")
+        return
+    except Exception as e:
+        logging.error(f"Error saat membaca kunci publik: {e}")
+        return
 
     # Buat server socket
-    server_socket = socket.socket()
-    server_socket.bind((host, port))
-    server_socket.listen(5)
+    try:
+        server_socket = socket.socket()
+        server_socket.bind((host, port))
+        server_socket.listen(5)
+        logging.info(f"PKA berjalan di {host}:{port}. Menunggu permintaan klien...")
 
-    print("PKA berjalan. Menunggu permintaan klien...")
+        while True:
+            try:
+                # Terima koneksi dari klien
+                conn, address = server_socket.accept()
+                # Tangani klien di thread terpisah
+                Thread(target=handle_client, args=(conn, address, public_key)).start()
+            except KeyboardInterrupt:
+                logging.info("\nPKA dihentikan secara manual.")
+                break
+            except Exception as e:
+                logging.error(f"Error di server: {e}")
 
-    while True:
-        try:
-            # Terima koneksi dari klien
-            conn, address = server_socket.accept()
-            print(f"Koneksi diterima dari: {address}")
+    except Exception as e:
+        logging.error(f"Error saat menginisialisasi server: {e}")
+    finally:
+        server_socket.close()
+        logging.info("Server socket ditutup.")
 
-            # Kirimkan kunci publik ke klien
-            conn.send(public_key.export_key())
-            print(f"Kunci publik dikirim ke: {address}")
-
-            # Tutup koneksi dengan klien
-            conn.close()
-        except KeyboardInterrupt:
-            print("\nPKA dihentikan secara manual.")
-            break
-        except Exception as e:
-            print(f"Error: {e}")
-
-    # Tutup server socket
-    server_socket.close()
-
-# Fungsi utama
 if __name__ == "__main__":
     pka_server_program()
