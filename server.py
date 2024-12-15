@@ -1,6 +1,7 @@
-import socket
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
+import socket
+import base64  # Pastikan ini ditambahkan
 
 # Fungsi untuk mengkonversi string ke biner
 def string_to_binary(s):
@@ -245,28 +246,21 @@ def des_decrypt_string(ciphertext, key):
 # decrypted_text = des_decrypt_string(encrypted_text, key)
 # print(f"Dekripsi: {decrypted_text}")
 
-import socket
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP
-
 # Fungsi untuk mendaftarkan kunci publik ke PKA
 def register_public_key_to_pka(public_key):
-    host = '127.0.0.1'  # Alamat PKA
-    port = 6000         # Port PKA
+    pka_host = '127.0.0.1'  # Alamat PKA
+    pka_port = 6000         # Port PKA
 
-    client_socket = socket.socket()
-    client_socket.connect((host, port))
-    
-    # Kirim kunci publik ke PKA
-    client_socket.send(public_key)
-    print("Kunci publik berhasil didaftarkan ke PKA.")
-    
-    client_socket.close()
-
-# Fungsi RSA Dekripsi
-def rsa_decrypt(encrypted_key, private_key):
-    cipher_rsa = PKCS1_OAEP.new(private_key)
-    return cipher_rsa.decrypt(encrypted_key)
+    try:
+        client_socket = socket.socket()
+        client_socket.connect((pka_host, pka_port))
+        
+        client_socket.send(b"STORE:" + public_key)
+        print("Kunci publik berhasil didaftarkan ke PKA.")
+        
+        client_socket.close()
+    except Exception as e:
+        print(f"Error saat mendaftarkan kunci publik ke PKA: {e}")
 
 def server_program():
     host = '127.0.0.1'
@@ -276,27 +270,26 @@ def server_program():
     server_socket.bind((host, port))
     server_socket.listen(1)
 
-    # Generate RSA keys (private and public)
+    # Load kunci privat RSA
     key = RSA.generate(2048)
     private_key = key
     public_key = key.publickey().export_key()
 
-    # Daftarkan kunci publik ke PKA
     register_public_key_to_pka(public_key)
+    print("Server berjalan. Menunggu koneksi dari klien...")
 
-    print("Menunggu koneksi dari klien...")
     conn, address = server_socket.accept()
-    print("Koneksi dari:", address)
+    print("Koneksi diterima dari:", address)
 
-    # Terima kunci DES terenkripsi
-    encrypted_key = conn.recv(256)  # RSA key size is 2048 bits, i.e., 256 bytes
-    des_key = rsa_decrypt(encrypted_key, private_key).decode()  # Dekripsi RSA dan ubah menjadi string
-    print("Kunci DES diterima dan didekripsi:", des_key)
+    # Menerima dan mendekripsi kunci DES
+    try:
+        encrypted_key = conn.recv(256)  # Menerima kunci DES terenkripsi
+        print("Kunci DES terenkripsi diterima (base64):", base64.b64encode(encrypted_key))
 
-    # Terima data terenkripsi
-    encrypted_data = conn.recv(1024).decode()  # Diterima dalam format string heksadesimal
-    decrypted_data = des_decrypt_string(encrypted_data, des_key)  # Dekripsi dengan DES buatan
-    print("Data setelah dekripsi:", decrypted_data)
+        des_key = PKCS1_OAEP.new(private_key).decrypt(encrypted_key)
+        print("Kunci DES berhasil didekripsi:", des_key)
+    except ValueError as e:
+        print("Error saat mendekripsi kunci DES:", e)
 
     conn.close()
 
